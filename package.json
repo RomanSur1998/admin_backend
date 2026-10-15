@@ -64,7 +64,12 @@
     "vitest": "^4.1.2"
   },
   "lint-staged": {
-  "*.ts": ["eslint --fix", "prettier --write"],
-  "*.{json,md,yml}": ["prettier --write"]
-}
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml}": [
+      "prettier --write"
+    ]
+  }
 }

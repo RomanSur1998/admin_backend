@@ -500,7 +500,8 @@ UI-заготовка `CodeForm` есть. Если включаем: `login` п
 (меню общее). Значит склад/персонал/филиал — филиал-scoped, меню/категории — сетевые.
 
 ### Принципы
-1. **Deny by default** — каждый роут явно помечен `@Roles(...)`.
+1. **Deny by default** — роут без `@Roles(...)` доступен только `SUPER_ADMIN`; без токена — только роуты с `@Public()`.
+   Забытый декоратор сужает доступ, а не открывает его.
 2. **Scoping из токена, не из запроса** — `branchId` берётся из `request.user`, а не из body/query.
 3. **Фильтр на уровне БД** — `where: { branchId }` в самом Prisma-запросе, не постфактум в контроллере.
 4. **Least privilege** — роль получает минимум; не плодить «админ может всё».
@@ -526,6 +527,63 @@ findAll(branchId?: string) {
 }
 ```
 CASL/ABAC вводится только если появится матрица вида «менеджер видит склад, но не зарплаты» — не раньше.
+
+### Итерации внедрения
+
+| Итерация | Когда | Что даёт |
+|---|---|---|
+| **RBAC-1. Фундамент** | вместе с AuthModule (v1) | роль и филиал в данных и токене, глобальные `AuthGuard` + `RolesGuard`, deny by default |
+| **RBAC-2. BRANCH_ADMIN** | v3a, вместе со складом/персоналом по филиалам | управление админами, `@Roles` на роутах, scoping по `branchId` в сервисах |
+| **RBAC-3. Аудит** | v3a, сразу после RBAC-2 | `AuditLog` для мутаций, входов и отказов `403` |
+| **RBAC-4. Расширения** | по запросу | настраиваемые permissions, вход для `Staff` (официант/бармен) |
+
+#### RBAC-1. Фундамент
+
+Цель: вся система закрыта по умолчанию, у каждого запроса есть типизированный `user` с ролью и филиалом.
+Реально существует только `SUPER_ADMIN`, но механизм проверки ролей уже работает и покрыт тестами.
+
+Состав:
+- **Схема:** `enum Role { SUPER_ADMIN, BRANCH_ADMIN }`, `Admin.role @default(SUPER_ADMIN)`, `Admin.branchId?`.
+- **JWT payload:** `{ sub, role, branchId }` — выдаётся в `AuthService.issueTokens`.
+- **`src/common/`:**
+  - `types/jwt-user.ts` — `JwtUser = { sub: string; role: Role; branchId: string | null }`;
+  - `decorators/public.decorator.ts` — `@Public()`;
+  - `decorators/roles.decorator.ts` — `@Roles(...roles)`;
+  - `decorators/current-user.decorator.ts` — `@CurrentUser()`;
+  - `guards/auth.guard.ts` — проверка Bearer-токена → `req.user`, иначе `401`;
+  - `guards/roles.guard.ts` — нет `@Roles` → только `SUPER_ADMIN`; роль не подходит → `403`.
+- **Регистрация:** оба guard через `APP_GUARD` в `AuthModule`, порядок: `AuthGuard` → `RolesGuard`.
+- **Публичные роуты:** `POST /auth/admin-login`, `POST /auth/refresh-token`, `GET /health`.
+
+Не входит: создание `BRANCH_ADMIN`, scoping в сервисах, аудит.
+
+Готово, когда:
+- запрос без токена на любой непубличный роут → `401`;
+- unit-тесты `RolesGuard`: `@Public` пропускает; без `@Roles` пропускает `SUPER_ADMIN` и отклоняет `BRANCH_ADMIN`;
+  с `@Roles('BRANCH_ADMIN')` пропускает `BRANCH_ADMIN`;
+- e2e: login → запрос с токеном → `200`; без токена → `401`.
+
+#### RBAC-2. BRANCH_ADMIN
+
+- `AdminsModule`: CRUD админов (только `SUPER_ADMIN`), у `BRANCH_ADMIN` `branchId` обязателен.
+- `@Roles(...)` на всех роутах по матрице из таблицы «Роли»; меню и категории для `BRANCH_ADMIN` — только `GET`.
+- Helper `branchScope(user)`: `SUPER_ADMIN` → `undefined` (вся сеть), `BRANCH_ADMIN` → свой `branchId`,
+  `BRANCH_ADMIN` без `branchId` → `403` (fail-safe).
+- Сервисы склада, персонала и филиалов принимают `branchId?` и фильтруют в Prisma-запросе;
+  чужой объект по `id` → `404`.
+- Смена роли или филиала, блокировка админа → отзыв всех его refresh-токенов.
+- e2e-матрица: каждая роль × каждый модуль × свой/чужой филиал.
+
+#### RBAC-3. Аудит
+
+- Модель `AuditLog` (раздел 7), `AuditService.log(...)`.
+- Запись: все мутации, проведение и отмена документов, входы (успешные и нет), отказы `403`.
+- Только добавление: API для изменения и удаления записей нет; просмотр — только `SUPER_ADMIN`.
+
+#### RBAC-4. Расширения (по запросу)
+
+- Настраиваемые роли: `Permission` + `RolePermission`, `@Roles` → `@RequirePermission('stock:write')`.
+- Вход для `Staff`: отдельный тип субъекта в токене (`kind: 'admin' | 'staff'`) и свои роли.
 
 ---
 

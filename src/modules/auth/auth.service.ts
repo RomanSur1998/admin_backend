@@ -10,10 +10,7 @@ export class AuthService {
   ) {}
 
   // async login(username: string, password: string) {}
-  async signIn(
-    username: string,
-    password: string,
-  ): Promise<{ acces_token: string }> {
+  async signIn(username: string, password: string): Promise<{ acces_token: string }> {
     const user = await this.userServive.findOne(username);
     if (user?.password !== password) {
       throw new UnauthorizedException();
