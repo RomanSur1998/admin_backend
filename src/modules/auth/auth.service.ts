@@ -1,23 +1,32 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { UsersService } from '../users/users.service.js';
 import { JwtService } from '@nestjs/jwt';
+import { AdminService } from '../admin/admin.service.js';
+import { LoginDto } from './dto/login.dto.js';
+
+import { Admin } from '../../generated/prisma/client.js';
+import argon2 from 'argon2';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private userServive: UsersService,
+    private adminService: AdminService,
     private jwtService: JwtService,
   ) {}
 
-  // async login(username: string, password: string) {}
-  async signIn(username: string, password: string): Promise<{ acces_token: string }> {
-    const user = await this.userServive.findOne(username);
-    if (user?.password !== password) {
-      throw new UnauthorizedException();
-    }
+  async signIn({ identifier, password }: LoginDto): Promise<{ acces_token: string }> {
+    const admin = await this.adminService.findByItem(identifier);
 
-    return {
-      acces_token: 'acces_token',
-    };
+    const valid = admin ? await argon2.verify(admin.passwordHash, password) : false;
+
+    if (!admin || !valid) {
+      throw new UnauthorizedException('Не валидные даные входа');
+    }
+    return this.issueToken(admin);
+  }
+
+  private async issueToken(admin: Admin): Promise<{ acces_token: string }> {
+    const payload = { sub: admin.id, role: admin.role, branchId: admin.branchId };
+
+    return { acces_token: await this.jwtService.signAsync(payload) };
   }
 }
