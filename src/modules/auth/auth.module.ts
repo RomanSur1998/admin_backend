@@ -8,6 +8,7 @@ import { Env } from '../../config/env.validator.js';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthGuard } from '../../common/guards/auth.guard.js';
 import { RoleGuard } from '../../common/guards/roles.guard.js';
+import { CsrfGuard } from '../../common/guards/csrf.guard.js';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { RoleGuard } from '../../common/guards/roles.guard.js';
   ],
   providers: [
     AuthService,
+    { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: RoleGuard },
   ],

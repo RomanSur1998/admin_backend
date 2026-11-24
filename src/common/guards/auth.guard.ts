@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import { AuthenticatedRequest, JwtUser } from '../types/jwt-user.js';
+import { ACCESS_COOKIE } from '../../modules/auth/auth.cookie.js';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -19,8 +20,10 @@ export class AuthGuard implements CanActivate {
     if (isPublic) return true;
 
     const req = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
-    const [type, token] = req.headers.authorization?.split(' ') ?? [];
-    if (type !== 'Bearer' || !token) throw new UnauthorizedException();
+    const cookie = req.cookies as Record<string, string | undefined> | undefined;
+    const [type, bearer] = req.headers.authorization?.split(' ') ?? [];
+    const token = cookie?.[ACCESS_COOKIE] ?? (type === 'Bearer' ? bearer : undefined);
+    if (!token) throw new UnauthorizedException();
 
     try {
       req.user = await this.jwt.verifyAsync<JwtUser>(token);
